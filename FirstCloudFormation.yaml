@@ -1,0 +1,96 @@
+# Optional section of CloudForamtion, enable you to input custom values to your template.
+Parameters: 
+  NameOfService: 
+    Description: "Mani's First Template"
+    Type: String
+  KeyName: 
+    Description: CF EC2 Instance
+    Type: AWS::EC2::KeyPair::KeyName #CF for an existing key pair
+Mappings: #section matches a key to a corresponding set of named values
+  RegionMap:
+    us-east-1: # US East Region
+      AMI: ami-1853ac65
+    us-west-1: # US West Regions
+      AMI: ami-bf5540df
+    eu-west-1: # EU West Regions
+      AMI: ami-3bfab942
+    ap-southeast-1: #Asia Region
+      AMI: ami-e2adf99e
+    ap-southeast-2: #Asia Region
+      AMI: ami-43874721
+Resources:
+  EC2Instance: 
+    Type: AWS::EC2::Instance 
+    Metadata: 
+      AWS::CloudFormation::Init:
+        config: 
+          packages: 
+            yum:
+              httpd: []
+              php: []
+          files: 
+            /var/www/html/index.php:
+              content: !Sub |
+                <?php print "Hello AWS World, This is Automated Message!!"; ?>
+          services: 
+            sysvinit:
+              httpd:
+                enabled: true
+                ensureRunning: true
+    Properties:
+      InstanceType: t2.micro
+      ImageId:
+        Fn::FindInMap:
+        - RegionMap
+        - !Ref AWS::Region  # Referring to the AWS Region section.
+        - AMI
+      SecurityGroupIds:
+        - !Ref MySecurityGroup # referring to the Security Group 
+      Tags:
+        - Key: Name
+          Value: !Ref NameOfService
+      KeyName: !Ref KeyName
+      UserData: # User specified Data used in EC2 Launch section.
+        'Fn::Base64': 
+          !Sub |
+            #!/bin/bash -xe            
+            # Ensure AWS CFN Bootstrap is the latest
+            yum install -y aws-cfn-bootstrap
+            # Install the files and packages from the metadata
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance  --region ${AWS::Region}
+  S3Bucket: # S3 Bucket creation
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: manidemobucket
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+          - Id: GlacierRule # Setting up lifecycle policy.
+            Prefix: glacier
+            Status: Enabled
+            ExpirationInDays: 365
+            Transitions:
+              - TransitionInDays: 1
+                StorageClass: GLACIER
+  MySecurityGroup: # Security Group Declaration.
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open Ports 22 and 80 #port rules
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+
+Outputs: #section declares output values that you can import into other stacks
+  Website:
+    Description: The Public DNS for the EC2 Instance
+    Value: !Sub 'http://${EC2Instance.PublicDnsName}'
+  BucketName: # S3 Bucket policy output.
+    Value: !Ref S3Bucket
+    Description: S3 Bucket with Lifecycle policy configuration.
